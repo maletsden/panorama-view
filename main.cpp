@@ -19,7 +19,9 @@
 using namespace cv;
 using namespace std;
 
-void filterGoodMatches(const image_stitcher::Matches& matches, image_stitcher::Matches& good_matches) {
+image_stitcher::Matches filterGoodMatches(const image_stitcher::Matches& matches) {
+  image_stitcher::Matches good_matches;
+
   auto match_w_min_distance = std::min_element(
       matches.begin(), matches.end(),
       [](const image_stitcher::Match& m1, const image_stitcher::Match& m2) {
@@ -30,9 +32,11 @@ void filterGoodMatches(const image_stitcher::Matches& matches, image_stitcher::M
   std::copy_if(
     matches.begin(), matches.end(), std::back_inserter(good_matches),
     [&match_w_min_distance](const image_stitcher::Match& match) {
-      return match.distance < match_w_min_distance->distance * 3;
+      return match.distance < match_w_min_distance->distance * 2;
     }
   );
+
+  return good_matches;
 }
 
 std::pair<Eigen::MatrixXf, Eigen::MatrixXf> getKeypointsPair(
@@ -106,62 +110,53 @@ int main() {
   }
 
   const std::size_t ref_img_idx = images.size() >> 1u;
+  const std::size_t left_img_num = ref_img_idx;
+  const std::size_t right_img_num = images.size() - ref_img_idx - 1;
+  const std::size_t RANSAC_iter_num = 500;
+  const std::size_t kNN_k = 3;
 
-  std::vector<image_stitcher::Matches> left_matches, right_matches;
-  left_matches.reserve(ref_img_idx);
-  right_matches.reserve(images.size() - ref_img_idx - 1);
+  // choose only "good" matches (ones that matches pretty well)
+  std::vector<image_stitcher::Matches> left_good_matches, right_good_matches;
+  left_good_matches.reserve(left_img_num);
+  right_good_matches.reserve(right_img_num);
+
+  std::vector<std::pair<Eigen::MatrixXf, Eigen::MatrixXf>> left_keypoint_pairs, right_keypoint_pairs;
+  left_keypoint_pairs.reserve(left_img_num);
+  right_keypoint_pairs.reserve(right_img_num);
+
+  std::vector<Eigen::Matrix3f> left_homography, right_homography;
+  left_homography.reserve(left_img_num);
+  right_homography.reserve(right_img_num);
 
   // calculates matches by running brut force k-Nearest-Neighbours algorithm
   for (std::size_t i = 0; i < ref_img_idx; ++i) {
-    left_matches.emplace_back(
-      image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i + 1], 3)
+    auto matches = image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i + 1], kNN_k);
+
+    left_good_matches.emplace_back(filterGoodMatches(matches));
+
+    left_keypoint_pairs.emplace_back(
+      getKeypointsPair(left_good_matches.back(), keypoints_cv[i], keypoints_cv[i + 1])
+    );
+
+    left_homography.emplace_back(
+      image_stitcher::homography_calculator::RANSAC(
+        left_keypoint_pairs.back(), image_stitcher::homography_calculator::MSE, RANSAC_iter_num
+      )
     );
   }
 
   for (std::size_t i = ref_img_idx + 1; i < images.size(); ++i) {
-    right_matches.emplace_back(
-      image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i - 1], 3)
-    );
-  }
+    auto matches = image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i - 1], kNN_k);
 
-//  return 0;
+    right_good_matches.emplace_back(filterGoodMatches(matches));
 
-  // choose only "good" matches (ones that matches pretty well)
-  std::vector<image_stitcher::Matches> left_good_matches{left_matches.size()},
-                                       right_good_matches{right_matches.size()};
-  for (std::size_t i = 0; i < left_matches.size(); ++i) {
-    filterGoodMatches(left_matches[i], left_good_matches[i]);
-  }
-  for (std::size_t i = 0; i < right_matches.size(); ++i) {
-    filterGoodMatches(right_matches[i], right_good_matches[i]);
-  }
+    right_keypoint_pairs.emplace_back(
+      getKeypointsPair(right_good_matches.back(), keypoints_cv[i], keypoints_cv[i - 1])
+    );
 
-  std::vector<std::pair<Eigen::MatrixXf, Eigen::MatrixXf>> left_keypoints, right_keypoints;
-  for (std::size_t i = 0; i < left_good_matches.size(); ++i) {
-    left_keypoints.emplace_back(
-      getKeypointsPair(left_good_matches[i], keypoints_cv[i], keypoints_cv[i + 1])
-    );
-  }
-  for (std::size_t i = 0; i < right_good_matches.size(); ++i) {
-    right_keypoints.emplace_back(
-        getKeypointsPair(right_good_matches[i], keypoints_cv[ref_img_idx + i + 1], keypoints_cv[ref_img_idx + i])
-    );
-  }
-
-  std::vector<Eigen::Matrix3f> left_homography, right_homography;
-  left_homography.reserve(left_keypoints.size());
-  right_homography.reserve(right_keypoints.size());
-  for (const auto& keypoints_pair: left_keypoints) {
-    left_homography.emplace_back(
-      image_stitcher::homography_calculator::RANSAC(
-        keypoints_pair, image_stitcher::homography_calculator::MSE, 500
-      )
-    );
-  }
-  for (const auto& keypoints_pair: right_keypoints) {
     right_homography.emplace_back(
       image_stitcher::homography_calculator::RANSAC(
-        keypoints_pair, image_stitcher::homography_calculator::MSE, 500
+        right_keypoint_pairs.back(), image_stitcher::homography_calculator::MSE, RANSAC_iter_num
       )
     );
   }
@@ -175,8 +170,8 @@ int main() {
   ) = ref_img_eigen;
 
   std::vector<Eigen::Matrix3f> direct_left_homography, direct_right_homography;
-  direct_left_homography.resize(left_homography.size());
-  direct_right_homography.reserve(right_homography.size());
+  direct_left_homography.resize(left_img_num);
+  direct_right_homography.reserve(right_img_num);
 
   for (int i = static_cast<int>(ref_img_idx) - 1; i >= 0; --i) {
     if (i == static_cast<int>(ref_img_idx) - 1) {
