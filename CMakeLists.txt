@@ -16,11 +16,13 @@ find_package(JPEG REQUIRED)
 
 # ----- Panorama View ----- #
 set(IMAGE_STITCHER_FILES
-    src/image_stitcher/bf_matcher/bf_matcher.cpp
-    src/image_stitcher/bf_matcher/bf_matcher.h
+    src/image_stitcher/image_stitcher.h
     src/image_stitcher/homography_calculator/homography_calculator.cpp
     src/image_stitcher/homography_calculator/homography_calculator.h
-    src/image_stitcher/image_stitcher.h)
+    src/image_stitcher/image_transformation/image_transformation.cpp
+    src/image_stitcher/image_transformation/image_transformation.h
+    src/image_stitcher/knn_finder/knn_finder.cpp
+    src/image_stitcher/knn_finder/knn_finder.h)
 set(SOURCE_FILES
     src/jpeg_img.cpp
     src/jpeg_handler/jpeg_handler.cpp
@@ -47,7 +49,8 @@ include_directories(${GTEST_INCLUDE_DIRS})
 set(TESTS_SOURCE_FILES
     tests/main_test.cpp
     tests/test_homography_calculator.h
-    tests/test_bf_matcher.h
+        tests/test_knn_finder.h
+    tests/test_image_transformation.h
     ${IMAGE_STITCHER_FILES})
 add_executable(panorama_view_tester ${TESTS_SOURCE_FILES})
 target_link_libraries(panorama_view_tester ${GTEST_LIBRARIES} Threads::Threads Eigen3::Eigen)

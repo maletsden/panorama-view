@@ -1,10 +1,7 @@
-#include <iostream>
-#include "bf_matcher.h"
-#include <algorithm>
+#include "knn_finder.h"
 
-// TODO: run in parallel
-image_stitcher::Matches image_stitcher::bf_matcher::kNN(
-    const Eigen::MatrixXf& points1, const Eigen::MatrixXf& points2, std::size_t k
+image_stitcher::Matches image_stitcher::knn_finder::bruteForce(
+  const Eigen::MatrixXf& points1, const Eigen::MatrixXf& points2, std::size_t k
 ) {
   // Calculate distance matrix
   const std::size_t N = points2.rows();
@@ -22,15 +19,14 @@ image_stitcher::Matches image_stitcher::bf_matcher::kNN(
   D = XX * Eigen::MatrixXf::Ones(1, K);
   D = D + Eigen::MatrixXf::Ones(N, 1) * YY;
   D = D - XY;
-  D = D.cwiseSqrt();
 
   // Find closest neighbours
   image_stitcher::Matches nn;
 
   float *data = D.data();
   std::vector<std::size_t> indexes_range;
-  indexes_range.reserve(K);
-  for (std::size_t i = 0; i < K; ++i) {
+  indexes_range.reserve(N);
+  for (std::size_t i = 0; i < N; ++i) {
     indexes_range.push_back(i);
   }
 
@@ -41,7 +37,7 @@ image_stitcher::Matches image_stitcher::bf_matcher::kNN(
     // get sorted indexes of column values
     std::sort(
       indexes.begin(), indexes.end(),
-      [data_start](std::size_t i1, std::size_t i2){ return data_start[i1] < data_start[i2]; }
+      [&data_start](std::size_t i1, std::size_t i2){ return data_start[i1] < data_start[i2]; }
     );
 
     // TODO: add check whether the point is not too far from the reference point

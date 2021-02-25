@@ -1,12 +1,11 @@
-#ifndef PANORAMA_VIEW_TEST_BF_MATCHER_H
-#define PANORAMA_VIEW_TEST_BF_MATCHER_H
+#ifndef PANORAMA_VIEW_TEST_KNN_FINDER_H
+#define PANORAMA_VIEW_TEST_KNN_FINDER_H
 
 #include <gtest/gtest.h>
 #include <Eigen/Dense>
 #include <vector>
 
 #include "../src/image_stitcher/image_stitcher.h"
-#include "../src/image_stitcher/bf_matcher/bf_matcher.h"
 
 void compareNN(const image_stitcher::Matches& expected_nn, const image_stitcher::Matches& nn) {
   ASSERT_EQ(expected_nn.size(), nn.size());
@@ -17,28 +16,30 @@ void compareNN(const image_stitcher::Matches& expected_nn, const image_stitcher:
   }
 }
 
-TEST(BFMatcher, kNN_SIMPLE_TEST) {
+TEST(kNNFinder, BF_SIMPLE_TEST) {
   Eigen::Matrix2f pt1, pt2;
 
-  pt1 << 1, 2, 3, 4;
-  pt2 << 5, 6, 7, 8;
+  pt1 << 1, 2,
+         3, 4;
+  pt2 << 5, 6,
+         7, 8;
 
-  auto nn = image_stitcher::bf_matcher::kNN(pt1, pt2, 2);
+  auto nn = image_stitcher::knn_finder::bruteForce(pt1, pt2, 2);
 
   image_stitcher::Matches expected_nn{
-      image_stitcher::Match{0, 0, 5.65685},
-      image_stitcher::Match{0, 1, 8.48528},
-      image_stitcher::Match{1, 0, 2.82843},
-      image_stitcher::Match{1, 1, 5.65685},
+      image_stitcher::Match{0, 0, 32},
+      image_stitcher::Match{0, 1, 72},
+      image_stitcher::Match{1, 0, 8},
+      image_stitcher::Match{1, 1, 32},
   };
 
   compareNN(expected_nn, nn);
 }
 
-TEST(BFMatcher, kNN_ZEROS) {
+TEST(kNNFinder, BF_ZEROS) {
   Eigen::Matrix2f pt1{Eigen::Matrix2f::Zero()}, pt2{Eigen::Matrix2f::Zero()};
 
-  auto nn = image_stitcher::bf_matcher::kNN(pt1, pt2, 2);
+  auto nn = image_stitcher::knn_finder::bruteForce(pt1, pt2, 2);
 
   image_stitcher::Matches expected_nn{
       image_stitcher::Match{0, 0, 0},
@@ -50,10 +51,10 @@ TEST(BFMatcher, kNN_ZEROS) {
   compareNN(expected_nn, nn);
 }
 
-TEST(BFMatcher, kNN_ONES) {
+TEST(kNNFinder, BF_ONES) {
   Eigen::Matrix2f pt1{Eigen::Matrix2f::Ones()}, pt2{Eigen::Matrix2f::Ones()};
 
-  auto nn = image_stitcher::bf_matcher::kNN(pt1, pt2, 2);
+  auto nn = image_stitcher::knn_finder::bruteForce(pt1, pt2, 2);
 
   image_stitcher::Matches expected_nn{
       image_stitcher::Match{0, 0, 0},
@@ -64,4 +65,24 @@ TEST(BFMatcher, kNN_ONES) {
 
   compareNN(expected_nn, nn);
 }
-#endif //PANORAMA_VIEW_TEST_BF_MATCHER_H
+
+//TEST(kNNFinder, KDTREE_SIMPLE_TEST) {
+//  Eigen::Matrix2f pt1, pt2;
+//
+//  pt1 << 0, 4,
+//         4, 4;
+//  pt2 << 0, 4,
+//         0, 0;
+//
+//  auto nn = image_stitcher::knn_finder::kDTree(pt1, pt2, 2);
+//
+//  image_stitcher::Matches expected_nn{
+//      image_stitcher::Match{0, 0, 4},
+//      image_stitcher::Match{0, 1, 2},
+//      image_stitcher::Match{1, 0, 2},
+//      image_stitcher::Match{1, 1, 4},
+//  };
+//
+//  compareNN(expected_nn, nn);
+//}
+#endif //PANORAMA_VIEW_TEST_KNN_FINDER_H

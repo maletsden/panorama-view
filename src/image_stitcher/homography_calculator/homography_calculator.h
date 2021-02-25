@@ -12,7 +12,7 @@ namespace image_stitcher::homography_calculator {
 
   Eigen::Matrix3f calcHomography(const Eigen::MatrixXf& src_pts, const Eigen::MatrixXf& dst_pts);
 
-  Eigen::Matrix3f RANSAC(const Eigen::MatrixXf& src_pts, const Eigen::MatrixXf& dst_pts,
+  Eigen::Matrix3f RANSAC(const std::pair<Eigen::MatrixXf, Eigen::MatrixXf>& points_pair,
                          transformCost cost = MSE, std::size_t num_iter = 100);
 }
 

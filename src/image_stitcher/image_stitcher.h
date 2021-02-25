@@ -15,6 +15,11 @@ namespace image_stitcher {
   };
 
   typedef std::vector<Match> Matches;
+  typedef Eigen::Matrix<std::uint8_t, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajorBit> Image;
 }
+
+#include "knn_finder/knn_finder.h"
+#include "homography_calculator/homography_calculator.h"
+#include "image_transformation/image_transformation.h"
 
 #endif //PANORAMA_VIEW_IMAGE_STITCHER_H

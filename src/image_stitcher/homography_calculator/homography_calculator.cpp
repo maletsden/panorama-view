@@ -38,9 +38,11 @@ Eigen::Matrix3f image_stitcher::homography_calculator::calcHomography(
 }
 
 Eigen::Matrix3f image_stitcher::homography_calculator::RANSAC(
-    const Eigen::MatrixXf& src_pts, const Eigen::MatrixXf& dst_pts,
+    const std::pair<Eigen::MatrixXf, Eigen::MatrixXf>& points_pair,
     transformCost cost, std::size_t num_iter
 ) {
+  auto& src_pts = std::get<0>(points_pair);
+  auto& dst_pts = std::get<1>(points_pair);
   if (src_pts.rows() != 3 || dst_pts.rows() != 3) {
     throw std::runtime_error(
         "image_stitcher::homography_calculator::RANSAC: source and destination points must have 3 x m dimensions"

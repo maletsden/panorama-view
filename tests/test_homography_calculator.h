@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "../src/image_stitcher/image_stitcher.h"
-#include "../src/image_stitcher/homography_calculator/homography_calculator.h"
 
 TEST(HomographyCalculator, MSE_SIMPLE_TEST) {
   Eigen::MatrixXf source_pts{3, 4}, target_pts{3, 4};
@@ -50,19 +49,19 @@ TEST(HomographyCalculator, CALC_HOMOGRAPHY_SIMPLE_TEST) {
 }
 
 TEST(HomographyCalculator, RANSAC_SIMPLE_TEST) {
-  Eigen::MatrixXf source_pts{3, 8}, target_pts{3, 8};
-
-  source_pts << 1, 1, 3, 3, 5, 5, 7, 7,
-                4, 2, 4, 2, 4, 2, 4, 2,
-                1, 1, 1, 1, 1, 1, 1, 1;
+  std::pair<Eigen::MatrixXf, Eigen::MatrixXf> points{
+      Eigen::MatrixXf{3, 8}, Eigen::MatrixXf{3, 8}
+  };
+  std::get<0>(points) << 1, 1, 3, 3, 5, 5, 7, 7,
+                            4, 2, 4, 2, 4, 2, 4, 2,
+                            1, 1, 1, 1, 1, 1, 1, 1;
 
   // shift by 4 along Ox and by 2 along Oy
-  target_pts << 5, 5, 7, 7, 9, 9, 11, 11,
-                6, 4, 6, 4, 6, 4,  6,  4,
-                1, 1, 1, 1, 1, 1,  1,  1;
-
+  std::get<1>(points) << 5, 5, 7, 7, 9, 9, 11, 11,
+                            6, 4, 6, 4, 6, 4,  6,  4,
+                            1, 1, 1, 1, 1, 1,  1,  1;
   auto homography = image_stitcher::homography_calculator::RANSAC(
-      source_pts, target_pts, image_stitcher::homography_calculator::MSE, 5
+    points, image_stitcher::homography_calculator::MSE, 5
   );
 
   Eigen::Matrix3f expected_homography;

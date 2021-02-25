@@ -12,11 +12,48 @@
 #include <opencv2/xfeatures2d.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/core/eigen.hpp>
-
+#include <opencv2/calib3d.hpp>
 
 #include "src/image_stitcher/image_stitcher.h"
-#include "src/image_stitcher/bf_matcher/bf_matcher.h"
-#include "src/image_stitcher/homography_calculator/homography_calculator.h"
+
+using namespace cv;
+using namespace std;
+
+void filterGoodMatches(const image_stitcher::Matches& matches, image_stitcher::Matches& good_matches) {
+  auto match_w_min_distance = std::min_element(
+      matches.begin(), matches.end(),
+      [](const image_stitcher::Match& m1, const image_stitcher::Match& m2) {
+        return m1.distance < m2.distance;
+      }
+  );
+
+  std::copy_if(
+    matches.begin(), matches.end(), std::back_inserter(good_matches),
+    [&match_w_min_distance](const image_stitcher::Match& match) {
+      return match.distance < match_w_min_distance->distance * 3;
+    }
+  );
+}
+
+std::pair<Eigen::MatrixXf, Eigen::MatrixXf> getKeypointsPair(
+  const image_stitcher::Matches& matches, const std::vector<cv::KeyPoint>& src_keypoints,
+  const std::vector<cv::KeyPoint>& dst_keypoints
+) {
+  auto key_pair = std::make_pair(
+    Eigen::MatrixXf{3, matches.size()},
+    Eigen::MatrixXf{3, matches.size()}
+  );
+
+  for (std::size_t i = 0; i < matches.size(); ++i) {
+    auto pt1 = src_keypoints[matches[i].pt1].pt;
+    auto pt2 = dst_keypoints[matches[i].pt2].pt;
+
+    std::get<0>(key_pair).col(i) << pt1.y, pt1.x, 1;
+    std::get<1>(key_pair).col(i) << pt2.y, pt2.x, 1;
+  }
+
+  return key_pair;
+}
 
 int main() {
 //  JPEGImage img{200, 200};
@@ -37,69 +74,153 @@ int main() {
 //
 //  jpeg_handler::writeImage(mountain1_grey, "mountain1_grey_.jpg");
 
-
   // TODO: replace opencv SIFT with another library or write the new one
-  const cv::Mat mountain1 = cv::imread("test-images/mountain_1.jpg", cv::IMREAD_COLOR);
-  const cv::Mat mountain2 = cv::imread("test-images/mountain_2.jpg", cv::IMREAD_COLOR);
+  std::vector<cv::Mat> images{
+      cv::imread("test-images/mountain_1.jpg", cv::IMREAD_COLOR),
+      cv::imread("test-images/mountain_2.jpg", cv::IMREAD_COLOR),
+      cv::imread("test-images/mountain_3.jpg", cv::IMREAD_COLOR),
+      cv::imread("test-images/mountain_4.jpg", cv::IMREAD_COLOR),
+  };
+
+  std::vector<Eigen::Map<image_stitcher::Image>> images_eigen;
+  images_eigen.reserve(images.size());
+  for (auto& image: images) {
+    images_eigen.emplace_back(image.data, image.rows, image.cols * image.channels());
+  }
+
+  std::vector<cv::Mat> gray_images{images.size()};
 
   auto detector = cv::SIFT::create();
-  std::vector<cv::KeyPoint> keypoints1, keypoints2;
-  cv::Mat desc1_cv, desc2_cv;
-  detector->detectAndCompute(mountain1, cv::noArray(), keypoints1, desc1_cv);
-  detector->detectAndCompute(mountain2, cv::noArray(), keypoints2, desc2_cv);
-
-  // Add results to image and save.
-  cv::Mat output;
-  cv::drawKeypoints(mountain1, keypoints1, output);
-  cv::imwrite("sift_result.jpg", output);
+  std::vector<std::vector<cv::KeyPoint>> keypoints_cv{images.size()};
+  std::vector<cv::Mat> descriptors_cv{images.size()};
+  std::vector<Eigen::MatrixXf> descriptors{images.size()};
 
 
-  auto matcher = cv::BFMatcher::create();
-  std::vector<std::vector<cv::DMatch> > cv_matches;
-  matcher->knnMatch( desc1_cv, desc2_cv, cv_matches, 1 );
+  for (std::size_t i = 0; i < images.size(); ++i) {
+    // convert image to grayscale
+    cv::cvtColor(images[i], gray_images[i], cv::COLOR_BGR2GRAY);
+    // calculate keypoints and their descriptors
+    detector->detectAndCompute(gray_images[i], cv::noArray(), keypoints_cv[i], descriptors_cv[i]);
+    // convert to eigen matrix
+    cv::cv2eigen(descriptors_cv[i], descriptors[i]);
+  }
 
-  //-- Draw matches
-  cv::Mat img_matches;
-  drawMatches( mountain1, keypoints1, mountain2, keypoints2, cv_matches, img_matches );
+  const std::size_t ref_img_idx = images.size() >> 1u;
 
-  imshow("img_matches",img_matches);
-  cv::waitKey(0);
-
-  // Convert to eigen matrix
-  Eigen::MatrixXf desc1, desc2;
-  cv::cv2eigen(desc1_cv, desc1);
-  cv::cv2eigen(desc2_cv, desc2);
+  std::vector<image_stitcher::Matches> left_matches, right_matches;
+  left_matches.reserve(ref_img_idx);
+  right_matches.reserve(images.size() - ref_img_idx - 1);
 
   // calculates matches by running brut force k-Nearest-Neighbours algorithm
-  auto matches = image_stitcher::bf_matcher::kNN(desc1, desc2, 1);
-
-  // choose only "good" matches (ones that are matched pretty well)
-  auto match_w_min_distance = std::min_element(
-    matches.begin(), matches.end(), [](const image_stitcher::Match& m1, const image_stitcher::Match& m2) {
-      return m1.distance < m2.distance;
-    }
-  );
-
-  image_stitcher::Matches good_matches;
-  for (auto& match: matches) {
-    if (match.distance < match_w_min_distance->distance * 3) {
-      good_matches.emplace_back(match);
-    }
+  for (std::size_t i = 0; i < ref_img_idx; ++i) {
+    left_matches.emplace_back(
+      image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i + 1], 3)
+    );
   }
 
-  // construct 3x(good_matches.size()) matrices with all keypoints
-  Eigen::MatrixXf points1{3, good_matches.size()}, points2{3, good_matches.size()};
-
-  for (std::size_t i = 0; i < good_matches.size(); ++i) {
-    auto pt1 = keypoints1[good_matches[i].pt1].pt;
-    auto pt2 = keypoints2[good_matches[i].pt2].pt;
-
-    points1.col(i) << pt1.x, pt1.y, 1;
-    points2.col(i) << pt2.x, pt2.y, 1;
+  for (std::size_t i = ref_img_idx + 1; i < images.size(); ++i) {
+    right_matches.emplace_back(
+      image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i - 1], 3)
+    );
   }
 
-  auto homography = image_stitcher::homography_calculator::RANSAC(points1, points2);
+//  return 0;
 
-  std::cout << homography << std::endl;
+  // choose only "good" matches (ones that matches pretty well)
+  std::vector<image_stitcher::Matches> left_good_matches{left_matches.size()},
+                                       right_good_matches{right_matches.size()};
+  for (std::size_t i = 0; i < left_matches.size(); ++i) {
+    filterGoodMatches(left_matches[i], left_good_matches[i]);
+  }
+  for (std::size_t i = 0; i < right_matches.size(); ++i) {
+    filterGoodMatches(right_matches[i], right_good_matches[i]);
+  }
 
+  std::vector<std::pair<Eigen::MatrixXf, Eigen::MatrixXf>> left_keypoints, right_keypoints;
+  for (std::size_t i = 0; i < left_good_matches.size(); ++i) {
+    left_keypoints.emplace_back(
+      getKeypointsPair(left_good_matches[i], keypoints_cv[i], keypoints_cv[i + 1])
+    );
+  }
+  for (std::size_t i = 0; i < right_good_matches.size(); ++i) {
+    right_keypoints.emplace_back(
+        getKeypointsPair(right_good_matches[i], keypoints_cv[ref_img_idx + i + 1], keypoints_cv[ref_img_idx + i])
+    );
+  }
+
+  std::vector<Eigen::Matrix3f> left_homography, right_homography;
+  left_homography.reserve(left_keypoints.size());
+  right_homography.reserve(right_keypoints.size());
+  for (const auto& keypoints_pair: left_keypoints) {
+    left_homography.emplace_back(
+      image_stitcher::homography_calculator::RANSAC(
+        keypoints_pair, image_stitcher::homography_calculator::MSE, 500
+      )
+    );
+  }
+  for (const auto& keypoints_pair: right_keypoints) {
+    right_homography.emplace_back(
+      image_stitcher::homography_calculator::RANSAC(
+        keypoints_pair, image_stitcher::homography_calculator::MSE, 500
+      )
+    );
+  }
+
+  const auto& ref_img_eigen = images_eigen[ref_img_idx];
+  image_stitcher::Image panorama{
+    image_stitcher::Image::Zero(ref_img_eigen.rows(), ref_img_eigen.cols() * images.size())
+  };
+  panorama.block(
+    0, ref_img_eigen.cols() * ref_img_idx, ref_img_eigen.rows(), ref_img_eigen.cols()
+  ) = ref_img_eigen;
+
+  std::vector<Eigen::Matrix3f> direct_left_homography, direct_right_homography;
+  direct_left_homography.resize(left_homography.size());
+  direct_right_homography.reserve(right_homography.size());
+
+  for (int i = static_cast<int>(ref_img_idx) - 1; i >= 0; --i) {
+    if (i == static_cast<int>(ref_img_idx) - 1) {
+      direct_left_homography[i] = left_homography[i];
+    } else {
+      direct_left_homography[i] = left_homography[i] * direct_left_homography[i + 1];
+    }
+
+    image_stitcher::image_transformation::applyHomography(
+        images_eigen[i], panorama, direct_left_homography[i],
+        0, static_cast<int>(ref_img_eigen.cols() * ref_img_idx / 3)
+    );
+
+    cv::Mat panorama_cv;
+    cv::eigen2cv(panorama, panorama_cv);
+    panorama_cv = panorama_cv.reshape(3, 0);
+
+    imshow("panorama_cv", panorama_cv);
+    cv::waitKey(0);
+  }
+
+  for (std::size_t i = ref_img_idx + 1; i < images.size(); ++i) {
+    auto& homo = right_homography[i - ref_img_idx - 1];
+
+    if (i == ref_img_idx + 1) {
+      direct_right_homography.emplace_back(homo);
+    } else {
+      direct_right_homography.emplace_back(homo * direct_right_homography.back());
+    }
+
+    image_stitcher::image_transformation::applyHomography(
+        images_eigen[i], panorama, direct_right_homography.back(),
+        0, static_cast<int>(ref_img_eigen.cols() * ref_img_idx / 3)
+    );
+
+    cv::Mat panorama_cv;
+    cv::eigen2cv(panorama, panorama_cv);
+    panorama_cv = panorama_cv.reshape(3, 0);
+
+    imshow("panorama_cv", panorama_cv);
+    cv::waitKey(0);
+  }
+
+
+  // TODO: crop image
+  // TODO: illuminate all black dots (by average of neighbours)
 }
