@@ -1,6 +1,18 @@
 # panorama-view
 Fast Panorama Stitching for Image Sequence
 
+# Demonstraition
+
+## Input images
+<img src="https://github.com/maletsden/panorama-view/blob/main/test-images/mountain_1.jpg?raw=true" width=200/>
+<img src="https://github.com/maletsden/panorama-view/blob/main/test-images/mountain_2.jpg?raw=true" width=200/>
+<img src="https://github.com/maletsden/panorama-view/blob/main/test-images/mountain_3.jpg?raw=true" width=200/>
+<img src="https://github.com/maletsden/panorama-view/blob/main/test-images/mountain_4.jpg?raw=true" width=200/>
+
+## Generated panorama
+<img src="https://github.com/maletsden/panorama-view/blob/main/results/mountain.jpg?raw=true" width=800/>
+
+
 ### Install required dependencies
 ```bash
 sudo apt-get install libjpeg-dev

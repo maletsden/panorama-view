@@ -2,7 +2,7 @@
 #define PANORAMA_VIEW_KD_TREE_H
 #include <Eigen/Dense>
 #include <random>
-#include <bits/unique_ptr.h>
+#include <memory>
 
 /**
  * Randomized K-Dimensional Tree

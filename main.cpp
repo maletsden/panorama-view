@@ -67,28 +67,11 @@ std::pair<Eigen::MatrixXf, Eigen::MatrixXf> getKeypointsPair(
 }
 
 int main() {
-//  JPEGImage img{200, 200};
-//
-//  // dummy image test
-//  for (JDIMENSION i = 0; i < img.m_image_height; ++i) {
-//    auto pixel = img.getPixel(i, i);
-//    *pixel++ = 255;
-//    *pixel++ = 255;
-//    *pixel = 255;
-//  }
-//
-//  jpeg_handler::writeImage(img,"test.jpg");
-//  auto mountain1 = jpeg_handler::readImage("test-images/mountain_1.jpg");
-//  jpeg_handler::writeImage(mountain1, "mountain1_.jpg");
-//
-//  auto mountain1_grey = mountain1.RGBToGRAYSCALE();
-//
-//  jpeg_handler::writeImage(mountain1_grey, "mountain1_grey_.jpg");
 
   auto start = get_current_time_fenced();
 
   // TODO: replace opencv SIFT with another library or write the new one
-  std::vector<cv::Mat> images{
+  std::vector<cv::Mat> images_cv{
       cv::imread("test-images/mountain_1.jpg", cv::IMREAD_COLOR),
       cv::imread("test-images/mountain_2.jpg", cv::IMREAD_COLOR),
       cv::imread("test-images/mountain_3.jpg", cv::IMREAD_COLOR),
@@ -98,28 +81,28 @@ int main() {
   //  const std::size_t KRefImgIdx = images.size() >> 1u;
   const std::size_t KRefImgIdx = 1;
   const std::size_t KLeftImgNum = KRefImgIdx;
-  const std::size_t KRightImgNum = images.size() - KRefImgIdx - 1;
+  const std::size_t KRightImgNum = images_cv.size() - KRefImgIdx - 1;
   const std::size_t KRANSACIterNum = 200;
   const auto KTransformCost = image_stitcher::homography_calculator::MSE;
   const std::size_t KKNNNeighNum = 2;
 
-  std::vector<Eigen::Map<image_stitcher::Image>> images_eigen;
-  images_eigen.reserve(images.size());
-  for (auto& image: images) {
-    images_eigen.emplace_back(image.data, image.rows, image.cols * image.channels());
+  std::vector<image_stitcher::Image> images;
+  images.reserve(images_cv.size());
+  for (auto& image: images_cv) {
+    images.emplace_back(image.data, image.rows, image.cols, image.channels());
   }
 
-  std::vector<cv::Mat> gray_images{images.size()};
+  std::vector<cv::Mat> gray_images{images_cv.size()};
 
   auto detector = cv::SIFT::create();
-  std::vector<std::vector<cv::KeyPoint>> keypoints_cv{images.size()};
-  std::vector<cv::Mat> descriptors_cv{images.size()};
-  std::vector<Eigen::MatrixXf> descriptors{images.size()};
+  std::vector<std::vector<cv::KeyPoint>> keypoints_cv{images_cv.size()};
+  std::vector<cv::Mat> descriptors_cv{images_cv.size()};
+  std::vector<Eigen::MatrixXf> descriptors{images_cv.size()};
 
 
-  for (std::size_t i = 0; i < images.size(); ++i) {
+  for (std::size_t i = 0; i < images_cv.size(); ++i) {
     // convert image to grayscale
-    cv::cvtColor(images[i], gray_images[i], cv::COLOR_BGR2GRAY);
+    cv::cvtColor(images_cv[i], gray_images[i], cv::COLOR_BGR2GRAY);
     // calculate keypoints and their descriptors
     detector->detectAndCompute(gray_images[i], cv::noArray(), keypoints_cv[i], descriptors_cv[i]);
     // convert to eigen matrix
@@ -154,7 +137,7 @@ int main() {
     }
 
     cv::Mat img_w_matches;
-    cv::drawMatches(images[i], keypoints_cv[i], images[i + 1], keypoints_cv[i + 1], matches_cv, img_w_matches);
+    cv::drawMatches(images_cv[i], keypoints_cv[i], images_cv[i + 1], keypoints_cv[i + 1], matches_cv, img_w_matches);
     imshow("img_w_matches", img_w_matches);
     cv::waitKey(0);
 #endif
@@ -184,7 +167,7 @@ int main() {
     }
 
     cv::Mat img_w_matches;
-    cv::drawMatches(images[i], keypoints_cv[i], images[i - 1], keypoints_cv[i - 1], matches_cv, img_w_matches);
+    cv::drawMatches(images_cv[i], keypoints_cv[i], images_cv[i - 1], keypoints_cv[i - 1], matches_cv, img_w_matches);
     imshow("img_w_matches", img_w_matches);
     cv::waitKey(0);
 #endif
@@ -199,13 +182,17 @@ int main() {
     );
   }
 
-  const auto& ref_img_eigen = images_eigen[KRefImgIdx];
+  const auto& ref_img_eigen = images[KRefImgIdx];
+
   image_stitcher::Image panorama{
-    image_stitcher::Image::Zero(ref_img_eigen.rows(), ref_img_eigen.cols() * images.size())
+    ref_img_eigen.rows, ref_img_eigen.cols * images.size(), ref_img_eigen.channels
   };
-  panorama.block(
-    0, ref_img_eigen.cols() * KRefImgIdx, ref_img_eigen.rows(), ref_img_eigen.cols()
-  ) = ref_img_eigen;
+
+  // set reference image
+  panorama.data.block(
+    0, ref_img_eigen.cols * ref_img_eigen.channels * KRefImgIdx,
+    ref_img_eigen.rows, ref_img_eigen.cols * ref_img_eigen.channels
+  ) = ref_img_eigen.data;
 
   std::vector<Eigen::Matrix3f> direct_left_homography, direct_right_homography;
   direct_left_homography.resize(KLeftImgNum);
@@ -219,13 +206,13 @@ int main() {
     }
 
     image_stitcher::image_transformation::applyHomography(
-      images_eigen[i], panorama, direct_left_homography[i],
-      0, static_cast<int>(ref_img_eigen.cols() * KRefImgIdx / 3)
+      images[i], panorama, direct_left_homography[i],
+      0, static_cast<int>(ref_img_eigen.cols * KRefImgIdx)
     );
 
 #if DEBUG
     cv::Mat panorama_cv;
-    cv::eigen2cv(panorama, panorama_cv);
+    cv::eigen2cv(panorama.data, panorama_cv);
     panorama_cv = panorama_cv.reshape(3, 0);
 
     imshow("panorama_cv", panorama_cv);
@@ -243,13 +230,13 @@ int main() {
     }
 
     image_stitcher::image_transformation::applyHomography(
-        images_eigen[i], panorama, direct_right_homography.back(),
-        0, static_cast<int>(ref_img_eigen.cols() * KRefImgIdx / 3)
+        images[i], panorama, direct_right_homography.back(),
+        0, static_cast<int>(ref_img_eigen.cols * KRefImgIdx)
     );
 
 #if DEBUG
     cv::Mat panorama_cv;
-    cv::eigen2cv(panorama, panorama_cv);
+    cv::eigen2cv(panorama.data, panorama_cv);
     panorama_cv = panorama_cv.reshape(3, 0);
 
     imshow("panorama_cv", panorama_cv);
@@ -257,11 +244,60 @@ int main() {
 #endif
   }
 
-  cv::Mat panorama_cv;
-  cv::eigen2cv(panorama, panorama_cv);
-  panorama_cv = panorama_cv.reshape(3, 0);
+  // crop black parts of panorama
+  Eigen::Matrix<std::uint8_t, Eigen::Dynamic, Eigen::Dynamic> black_mask{panorama.rows, panorama.cols};
+  for (std::size_t row_i = 0; row_i < panorama.rows; ++row_i)
+  {
+    for (std::size_t col_i = 0; col_i < panorama.cols; ++col_i)
+    {
+      black_mask(row_i, col_i) = (
+        panorama(row_i, col_i, 0) | panorama(row_i, col_i, 1) | panorama(row_i, col_i, 2)
+      ) == 0 ? 1 : 0;
+    }
+  }
 
-  cv::imwrite("panorama_view.jpg", panorama_cv);
+  std::size_t left_col = 0;
+  for (std::size_t col_i = 0; col_i < panorama.cols; ++col_i) {
+    auto col_start = black_mask.data() + col_i * black_mask.rows();
+    if (std::count(col_start, col_start + black_mask.rows(), 1) < black_mask.rows() * 0.05) {
+      break;
+    }
+    left_col++;
+  }
+
+  std::size_t right_col = panorama.cols - 1;
+  for (std::size_t col_i = panorama.cols - 1; col_i > 0; --col_i) {
+    auto col_start = black_mask.data() + col_i * black_mask.rows();
+    if (std::count(col_start, col_start + black_mask.rows(), 1) < black_mask.rows() * 0.05) {
+      break;
+    }
+    right_col--;
+  }
+
+  auto cropped_width = right_col - left_col;
+
+  auto black_pixel = std::count(
+    black_mask.data() + left_col * black_mask.rows(),
+    black_mask.data() + (std::min(right_col + 1, panorama.cols)) * black_mask.rows(),
+    1
+  );
+  auto panorama_proportion = 1 - black_pixel / (panorama.rows * cropped_width);
+
+  std::size_t new_rows_num = panorama.rows * std::sqrt(panorama_proportion);
+  std::size_t new_cols_num = cropped_width * std::sqrt(panorama_proportion);
+
+  image_stitcher::ImageData cropped_panorama{new_rows_num, new_cols_num * panorama.channels};
+  cropped_panorama = panorama.data.block(
+      (panorama.rows - new_rows_num) / 2, ((cropped_width - new_cols_num) / 2 + left_col) * panorama.channels,
+      new_rows_num, new_cols_num * panorama.channels
+  );
+
+  // Save image
+  cv::Mat cropped_panorama_cv;
+  cv::eigen2cv(cropped_panorama, cropped_panorama_cv);
+  cropped_panorama_cv = cropped_panorama_cv.reshape(3, 0);
+
+  cv::imwrite("results/mountain.jpg", cropped_panorama_cv);
 
   auto finish = get_current_time_fenced();
 
@@ -271,5 +307,4 @@ int main() {
 
 
   // TODO: crop image
-  // TODO: illuminate all black dots (by average of neighbours)
 }

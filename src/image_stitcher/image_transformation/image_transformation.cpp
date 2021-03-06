@@ -1,106 +1,105 @@
 #include <iostream>
 #include "image_transformation.h"
 
-void copy_pixel(const std::uint8_t *pixel, std::uint8_t *out_pixel) {
-  *out_pixel++ = *pixel++;
-  *out_pixel++ = *pixel++;
-  *out_pixel = *pixel;
+Eigen::MatrixXf image_stitcher::image_transformation::applyHomography(
+    const Eigen::Matrix3f& homography, const Eigen::MatrixXf& pts
+)
+{
+  auto res_pts = homography * pts;
+
+  // divide all vectors by 'z' coordinate
+  return res_pts.array().rowwise() / res_pts.row(res_pts.rows() - 1).array();
 }
 
-bool isEmpty(const std::uint8_t *pixel) {
-  return *pixel++ == 0 && *pixel++ == 0 && *pixel == 0;
+/**
+ * Get limits for image transformation
+ *
+ * @param src_img - source image
+ * @param dst_img - destination image
+ * @param homography - homography transformation matrix
+ * @param shift_by_rows - number of rows that need to be shifted from start of destination image
+ * @param shift_by_cols - number of cols that need to be shifted from start of destination image
+ *
+ * @return [min_row, max_row, min_col, max_col]
+ */
+std::array<long, 4> getTransformationLimits(
+    const image_stitcher::Image& img, image_stitcher::Image& dst_img, const Eigen::Matrix3f& homography,
+    long shift_by_rows, long shift_by_cols
+)
+{
+  Eigen::MatrixXf pts{3, 4};
+  pts << 0,            0, img.rows - 1, img.rows - 1,
+         0, img.cols - 1, img.cols - 1,            0,
+         1,            1,            1,            1;
+
+  auto transformed_pts = image_stitcher::image_transformation::applyHomography(homography, pts);
+
+  std::array<long, 4> transform_limits{
+    std::numeric_limits<long>::max(), // min_row
+    std::numeric_limits<long>::min(), // max_row
+    std::numeric_limits<long>::max(), // min_col
+    std::numeric_limits<long>::min()  // max_col
+  };
+
+  for (int i = 0; i < 4; ++i) {
+    long x = static_cast<long>(std::roundf(transformed_pts(0, i)));
+    long y = static_cast<long>(std::roundf(transformed_pts(1, i)));
+    transform_limits[0] = std::min(transform_limits[0], x);
+    transform_limits[1] = std::max(transform_limits[1], x);
+    transform_limits[2] = std::min(transform_limits[2], y);
+    transform_limits[3] = std::max(transform_limits[3], y);
+  }
+
+  // shift and limit to destination image sizes
+  transform_limits[0] = std::min(
+      std::max(transform_limits[0] + shift_by_rows, long(0)), static_cast<long>(dst_img.rows)
+  );
+  transform_limits[1] = std::min(
+      std::max(transform_limits[1] + shift_by_rows, long(0)), static_cast<long>(dst_img.rows)
+  );
+  transform_limits[2] = std::min(
+      std::max(transform_limits[2] + shift_by_cols, long(0)), static_cast<long>(dst_img.cols)
+  );
+  transform_limits[3] = std::min(
+      std::max(transform_limits[3] + shift_by_cols, long(0)), static_cast<long>(dst_img.cols)
+  );
+
+  return transform_limits;
 }
 
 void image_stitcher::image_transformation::applyHomography(
     const image_stitcher::Image& src_img, image_stitcher::Image& dst_img,
-    const Eigen::Matrix3f& homography, int shift_by_rows, int shift_by_cols, int img_n_channels
-) {
-  Eigen::MatrixXf transformMat{2, 3};
-  transformMat << homography(0, 0), homography(0, 1), homography(0, 2) + static_cast<float>(shift_by_rows),
-                  homography(1, 0), homography(1, 1), homography(1, 2) + static_cast<float>(shift_by_cols);
+    const Eigen::Matrix3f& homography, long shift_by_rows, long shift_by_cols
+)
+{
+  auto homo_inv = homography.inverse();
 
-  for (long row_i = 0; row_i < src_img.rows(); ++row_i) {
-    auto shift_x = static_cast<float>(row_i) * transformMat(0, 0) + transformMat(0, 2);
-    auto shift_y = static_cast<float>(row_i) * transformMat(1, 0) + transformMat(1, 2);
-    for (long col_i = 0; col_i < src_img.cols() / img_n_channels; ++col_i) {
+  // limit transformation points for better performance
+  auto transform_limits = getTransformationLimits(src_img, dst_img, homography, shift_by_rows, shift_by_cols);
 
-      auto new_row_i = static_cast<long>(shift_x + static_cast<float>(col_i) * transformMat(0, 1));
-      auto new_col_i = static_cast<long>(shift_y + static_cast<float>(col_i) * transformMat(1, 1));
+  for (long row_i = transform_limits[0]; row_i < transform_limits[1]; ++row_i)
+  {
+    auto org_x = static_cast<float>(row_i - shift_by_rows);
+    auto shift_x = homo_inv(0, 0) * org_x + homo_inv(0, 2);
+    auto shift_y = homo_inv(1, 0) * org_x + homo_inv(1, 2);
+    auto shift_z = homo_inv(2, 0) * org_x + homo_inv(2, 2);
 
-      if (new_row_i < 0 || new_row_i >= dst_img.rows() || new_col_i < 0 || new_col_i >= (dst_img.cols() / img_n_channels)) {
+    for (long col_i = transform_limits[2]; col_i < transform_limits[3]; ++col_i)
+    {
+      auto org_y = static_cast<float>(col_i - shift_by_cols);
+
+      float z = shift_z + homo_inv(2, 1) * org_y;
+      long x = static_cast<long>(std::roundf((shift_x + homo_inv(0, 1) * org_y) / z));
+      long y = static_cast<long>(std::roundf((shift_y + homo_inv(1, 1) * org_y) / z));
+
+      if ((x < 0 || x >= static_cast<long>(src_img.rows)) || (y < 0 || y >= static_cast<long>(src_img.cols)))
+      {
         continue;
       }
 
-      auto out_pixel = dst_img.data() + new_row_i * dst_img.cols() + new_col_i * img_n_channels;
-
-      if (!isEmpty(out_pixel)) {
-        continue;
-      }
-
-      auto pixel = src_img.data() + row_i * src_img.cols() + col_i * img_n_channels;
-      copy_pixel(pixel, out_pixel);
-
-      // illuminate stitches due to float to long conversion
-      if (new_row_i - 1 > 0) {
-        copy_pixel(pixel, out_pixel - dst_img.cols());
-      }
-
-      if (new_col_i - 1 > 0) {
-        copy_pixel(pixel, out_pixel - img_n_channels);
-      }
-
-      if (new_row_i - 1 > 0 && new_col_i - 1 > 0) {
-        copy_pixel(pixel, out_pixel - dst_img.cols() - img_n_channels);
-      }
+      dst_img(row_i, col_i, 0) = src_img(x, y, 0);
+      dst_img(row_i, col_i, 1) = src_img(x, y, 1);
+      dst_img(row_i, col_i, 2) = src_img(x, y, 2);
     }
   }
-
-//  std::vector<uint8_t*> neighbours_pixels;
-//  neighbours_pixels.reserve(4);
-//  for (long row_i = 0; row_i < dst_img.rows(); ++row_i) {
-//    for (long col_i = 0; col_i < dst_img.cols() / img_n_channels; ++col_i) {
-//      neighbours_pixels.clear();
-//      auto out_pixel = dst_img.data() + row_i * dst_img.cols() + col_i * img_n_channels;
-//
-//      if (!isEmpty(out_pixel)) {
-//        continue;
-//      }
-//
-//      if (col_i - 1 > 0) {
-//        neighbours_pixels.push_back(dst_img.data() + row_i * dst_img.cols() + (col_i - 1) * img_n_channels);
-//      }
-//
-//      if (row_i - 1 > 0) {
-//        neighbours_pixels.push_back(dst_img.data() + (row_i - 1) * dst_img.cols() + col_i * img_n_channels);
-//      }
-//
-//      if (row_i + 1 < dst_img.rows()) {
-//        neighbours_pixels.push_back(dst_img.data() + (row_i + 1) * dst_img.cols() + col_i * img_n_channels);
-//      }
-//
-//      if (col_i + 1 < (dst_img.cols() / img_n_channels)) {
-//        neighbours_pixels.push_back(dst_img.data() + row_i * dst_img.cols() + (col_i + 1) * img_n_channels);
-//      }
-//
-//      uint16_t r = 0, g = 0, b = 0, count = 0;
-//      for (uint8_t *n_pixel: neighbours_pixels) {
-//        if (isEmpty(n_pixel)) {
-//          continue;
-//        }
-//        r += *n_pixel++;
-//        g += *n_pixel++;
-//        b += *n_pixel;
-//        count++;
-//      }
-//      if (!count) {
-//        continue;
-//      }
-//      r /= count;
-//      g /= count;
-//      b /= count;
-//      uint8_t convolution_pixel[3] = {static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)};
-//
-//      copy_pixel(convolution_pixel, out_pixel);
-//    }
-//  }
 }

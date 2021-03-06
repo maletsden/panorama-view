@@ -32,12 +32,7 @@ double image_stitcher::homography_calculator::Huber(const Eigen::MatrixXf& pts1,
   return cost;
 }
 
-/**
- *
- * @param src_pts
- * @param dst_pts
- * @return
- */
+
 Eigen::Matrix3f image_stitcher::homography_calculator::calcHomography(
     const Eigen::MatrixXf& src_pts, const Eigen::MatrixXf& dst_pts
 )
@@ -124,8 +119,10 @@ Eigen::Matrix3f image_stitcher::homography_calculator::RANSAC(
 
     auto homography = calcHomography(sample_src_pts, sample_dst_pts);
 
+    auto transformed_pts = image_stitcher::image_transformation::applyHomography(homography, src_pts);
+
     // update best homography if needed
-    auto sample_cost = cost(homography * src_pts, dst_pts);
+    auto sample_cost = cost(transformed_pts, dst_pts);
     if (sample_cost < min_cost)
     {
       min_cost = sample_cost;
