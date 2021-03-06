@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <chrono>
+#include <atomic>
 
 #include "src/jpeg_img.h"
 #include "src/jpeg_handler/jpeg_handler.h"
@@ -16,27 +17,33 @@
 
 #include "src/image_stitcher/image_stitcher.h"
 
-using namespace cv;
-using namespace std;
+#define DEBUG 0
 
-image_stitcher::Matches filterGoodMatches(const image_stitcher::Matches& matches) {
+image_stitcher::Matches filterGoodMatches(const std::vector<image_stitcher::Matches>& matches) {
   image_stitcher::Matches good_matches;
 
-  auto match_w_min_distance = std::min_element(
-      matches.begin(), matches.end(),
-      [](const image_stitcher::Match& m1, const image_stitcher::Match& m2) {
-        return m1.distance < m2.distance;
-      }
-  );
-
-  std::copy_if(
-    matches.begin(), matches.end(), std::back_inserter(good_matches),
-    [&match_w_min_distance](const image_stitcher::Match& match) {
-      return match.distance < match_w_min_distance->distance * 2;
+  // Lowe's ratio test (second best match distance, must be at least twice larger that first one)
+  // in other words, select only matches that are distinguishable
+  for (auto &pt_matches: matches) {
+    if ((pt_matches[0].distance / pt_matches[1].distance) <= 0.5) {
+      good_matches.emplace_back(pt_matches[0]);
     }
-  );
+  }
 
   return good_matches;
+}
+
+inline std::chrono::high_resolution_clock::time_point get_current_time_fenced() {
+  // to ensure that compiler will not change the order fences are added
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  auto res_time = std::chrono::high_resolution_clock::now();
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  return res_time;
+}
+
+template<class D>
+inline long long to_ms(const D& d) {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(d).count();
 }
 
 std::pair<Eigen::MatrixXf, Eigen::MatrixXf> getKeypointsPair(
@@ -78,6 +85,8 @@ int main() {
 //
 //  jpeg_handler::writeImage(mountain1_grey, "mountain1_grey_.jpg");
 
+  auto start = get_current_time_fenced();
+
   // TODO: replace opencv SIFT with another library or write the new one
   std::vector<cv::Mat> images{
       cv::imread("test-images/mountain_1.jpg", cv::IMREAD_COLOR),
@@ -85,6 +94,14 @@ int main() {
       cv::imread("test-images/mountain_3.jpg", cv::IMREAD_COLOR),
       cv::imread("test-images/mountain_4.jpg", cv::IMREAD_COLOR),
   };
+
+  //  const std::size_t KRefImgIdx = images.size() >> 1u;
+  const std::size_t KRefImgIdx = 1;
+  const std::size_t KLeftImgNum = KRefImgIdx;
+  const std::size_t KRightImgNum = images.size() - KRefImgIdx - 1;
+  const std::size_t KRANSACIterNum = 200;
+  const auto KTransformCost = image_stitcher::homography_calculator::MSE;
+  const std::size_t KKNNNeighNum = 2;
 
   std::vector<Eigen::Map<image_stitcher::Image>> images_eigen;
   images_eigen.reserve(images.size());
@@ -109,30 +126,38 @@ int main() {
     cv::cv2eigen(descriptors_cv[i], descriptors[i]);
   }
 
-  const std::size_t ref_img_idx = images.size() >> 1u;
-  const std::size_t left_img_num = ref_img_idx;
-  const std::size_t right_img_num = images.size() - ref_img_idx - 1;
-  const std::size_t RANSAC_iter_num = 500;
-  const std::size_t kNN_k = 3;
-
   // choose only "good" matches (ones that matches pretty well)
-  std::vector<image_stitcher::Matches> left_good_matches, right_good_matches;
-  left_good_matches.reserve(left_img_num);
-  right_good_matches.reserve(right_img_num);
+  std::vector<std::vector<image_stitcher::Match>> left_good_matches, right_good_matches;
+  left_good_matches.reserve(KLeftImgNum);
+  right_good_matches.reserve(KRightImgNum);
 
   std::vector<std::pair<Eigen::MatrixXf, Eigen::MatrixXf>> left_keypoint_pairs, right_keypoint_pairs;
-  left_keypoint_pairs.reserve(left_img_num);
-  right_keypoint_pairs.reserve(right_img_num);
+  left_keypoint_pairs.reserve(KLeftImgNum);
+  right_keypoint_pairs.reserve(KRightImgNum);
 
   std::vector<Eigen::Matrix3f> left_homography, right_homography;
-  left_homography.reserve(left_img_num);
-  right_homography.reserve(right_img_num);
+  left_homography.reserve(KLeftImgNum);
+  right_homography.reserve(KRightImgNum);
 
-  // calculates matches by running brut force k-Nearest-Neighbours algorithm
-  for (std::size_t i = 0; i < ref_img_idx; ++i) {
-    auto matches = image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i + 1], kNN_k);
+  // calculates matches by running brut force or KDTree based algorithm k-Nearest-Neighbours algorithm
+  for (std::size_t i = 0; i < KRefImgIdx; ++i) {
+//    auto matches = image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i + 1], kNN_k);
+    auto matches = image_stitcher::knn_finder::randomKDTreeForest(descriptors[i], descriptors[i + 1], KKNNNeighNum);
 
     left_good_matches.emplace_back(filterGoodMatches(matches));
+
+#if DEBUG
+    std::vector<cv::DMatch> matches_cv;
+    matches_cv.reserve(left_good_matches.back().size());
+    for (auto &match: left_good_matches.back()) {
+      matches_cv.emplace_back(static_cast<int>(match.pt1), static_cast<int>(match.pt2), match.distance);
+    }
+
+    cv::Mat img_w_matches;
+    cv::drawMatches(images[i], keypoints_cv[i], images[i + 1], keypoints_cv[i + 1], matches_cv, img_w_matches);
+    imshow("img_w_matches", img_w_matches);
+    cv::waitKey(0);
+#endif
 
     left_keypoint_pairs.emplace_back(
       getKeypointsPair(left_good_matches.back(), keypoints_cv[i], keypoints_cv[i + 1])
@@ -140,63 +165,78 @@ int main() {
 
     left_homography.emplace_back(
       image_stitcher::homography_calculator::RANSAC(
-        left_keypoint_pairs.back(), image_stitcher::homography_calculator::MSE, RANSAC_iter_num
+        left_keypoint_pairs.back(), KTransformCost, KRANSACIterNum
       )
     );
   }
 
-  for (std::size_t i = ref_img_idx + 1; i < images.size(); ++i) {
-    auto matches = image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i - 1], kNN_k);
+  for (std::size_t i = KRefImgIdx + 1; i < images.size(); ++i) {
+//    auto matches = image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i - 1], kNN_k);
+    auto matches = image_stitcher::knn_finder::randomKDTreeForest(descriptors[i], descriptors[i - 1], KKNNNeighNum);
 
     right_good_matches.emplace_back(filterGoodMatches(matches));
 
+#if DEBUG
+    std::vector<cv::DMatch> matches_cv;
+    matches_cv.reserve(right_good_matches.back().size());
+    for (auto &match: right_good_matches.back()) {
+      matches_cv.emplace_back(static_cast<int>(match.pt1), static_cast<int>(match.pt2), match.distance);
+    }
+
+    cv::Mat img_w_matches;
+    cv::drawMatches(images[i], keypoints_cv[i], images[i - 1], keypoints_cv[i - 1], matches_cv, img_w_matches);
+    imshow("img_w_matches", img_w_matches);
+    cv::waitKey(0);
+#endif
     right_keypoint_pairs.emplace_back(
       getKeypointsPair(right_good_matches.back(), keypoints_cv[i], keypoints_cv[i - 1])
     );
 
     right_homography.emplace_back(
       image_stitcher::homography_calculator::RANSAC(
-        right_keypoint_pairs.back(), image_stitcher::homography_calculator::MSE, RANSAC_iter_num
+        right_keypoint_pairs.back(), image_stitcher::homography_calculator::Huber, KRANSACIterNum
       )
     );
   }
 
-  const auto& ref_img_eigen = images_eigen[ref_img_idx];
+  const auto& ref_img_eigen = images_eigen[KRefImgIdx];
   image_stitcher::Image panorama{
     image_stitcher::Image::Zero(ref_img_eigen.rows(), ref_img_eigen.cols() * images.size())
   };
   panorama.block(
-    0, ref_img_eigen.cols() * ref_img_idx, ref_img_eigen.rows(), ref_img_eigen.cols()
+    0, ref_img_eigen.cols() * KRefImgIdx, ref_img_eigen.rows(), ref_img_eigen.cols()
   ) = ref_img_eigen;
 
   std::vector<Eigen::Matrix3f> direct_left_homography, direct_right_homography;
-  direct_left_homography.resize(left_img_num);
-  direct_right_homography.reserve(right_img_num);
+  direct_left_homography.resize(KLeftImgNum);
+  direct_right_homography.reserve(KRightImgNum);
 
-  for (int i = static_cast<int>(ref_img_idx) - 1; i >= 0; --i) {
-    if (i == static_cast<int>(ref_img_idx) - 1) {
+  for (int i = static_cast<int>(KRefImgIdx) - 1; i >= 0; --i) {
+    if (i == static_cast<int>(KRefImgIdx) - 1) {
       direct_left_homography[i] = left_homography[i];
     } else {
       direct_left_homography[i] = left_homography[i] * direct_left_homography[i + 1];
     }
 
     image_stitcher::image_transformation::applyHomography(
-        images_eigen[i], panorama, direct_left_homography[i],
-        0, static_cast<int>(ref_img_eigen.cols() * ref_img_idx / 3)
+      images_eigen[i], panorama, direct_left_homography[i],
+      0, static_cast<int>(ref_img_eigen.cols() * KRefImgIdx / 3)
     );
 
+#if DEBUG
     cv::Mat panorama_cv;
     cv::eigen2cv(panorama, panorama_cv);
     panorama_cv = panorama_cv.reshape(3, 0);
 
     imshow("panorama_cv", panorama_cv);
     cv::waitKey(0);
+#endif
   }
 
-  for (std::size_t i = ref_img_idx + 1; i < images.size(); ++i) {
-    auto& homo = right_homography[i - ref_img_idx - 1];
+  for (std::size_t i = KRefImgIdx + 1; i < images.size(); ++i) {
+    auto& homo = right_homography[i - KRefImgIdx - 1];
 
-    if (i == ref_img_idx + 1) {
+    if (i == KRefImgIdx + 1) {
       direct_right_homography.emplace_back(homo);
     } else {
       direct_right_homography.emplace_back(homo * direct_right_homography.back());
@@ -204,16 +244,30 @@ int main() {
 
     image_stitcher::image_transformation::applyHomography(
         images_eigen[i], panorama, direct_right_homography.back(),
-        0, static_cast<int>(ref_img_eigen.cols() * ref_img_idx / 3)
+        0, static_cast<int>(ref_img_eigen.cols() * KRefImgIdx / 3)
     );
 
+#if DEBUG
     cv::Mat panorama_cv;
     cv::eigen2cv(panorama, panorama_cv);
     panorama_cv = panorama_cv.reshape(3, 0);
 
     imshow("panorama_cv", panorama_cv);
     cv::waitKey(0);
+#endif
   }
+
+  cv::Mat panorama_cv;
+  cv::eigen2cv(panorama, panorama_cv);
+  panorama_cv = panorama_cv.reshape(3, 0);
+
+  cv::imwrite("panorama_view.jpg", panorama_cv);
+
+  auto finish = get_current_time_fenced();
+
+  std::cout << "Panorama successfully created!" << std::endl;
+  std::cout << "Total consumed time: " << to_ms(finish - start) << std::endl;
+
 
 
   // TODO: crop image

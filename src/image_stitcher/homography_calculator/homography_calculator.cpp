@@ -1,17 +1,52 @@
-#include <random>
 #include "homography_calculator.h"
 
-double image_stitcher::homography_calculator::MSE(const Eigen::MatrixXf& pts1, const Eigen::MatrixXf& pts2) {
+double image_stitcher::homography_calculator::MSE(const Eigen::MatrixXf& pts1, const Eigen::MatrixXf& pts2)
+{
   return static_cast<double>((pts1 - pts2).array().square().sum());
 }
 
+double image_stitcher::homography_calculator::Huber(const Eigen::MatrixXf& pts1, const Eigen::MatrixXf& pts2)
+{
+  auto distances = (pts1 - pts2).colwise().norm();
+
+  // standard deviation
+  double sd = (
+    (
+      (distances.colwise() - distances.rowwise().mean()).rowwise().squaredNorm()
+    ) / (distances.cols() - 1)
+  ).cwiseSqrt()(0, 0);
+
+  double cost = 0.0;
+  double delta = 1.345 * sd;
+
+  for (long i = 0; i < distances.cols(); ++i)
+  {
+    auto r = distances(0, i);
+    if (r < delta) {
+      cost += 0.5 * r * r;
+    } else {
+      cost += delta * (r - 0.5 * delta);
+    }
+  }
+
+  return cost;
+}
+
+/**
+ *
+ * @param src_pts
+ * @param dst_pts
+ * @return
+ */
 Eigen::Matrix3f image_stitcher::homography_calculator::calcHomography(
     const Eigen::MatrixXf& src_pts, const Eigen::MatrixXf& dst_pts
-) {
+)
+{
   typedef Eigen::Matrix<float, 8, 8> HomographyMatrix;
   HomographyMatrix PH;
   Eigen::VectorXf b{8};
-  for (unsigned int i = 0, j = 0; i < 4; i++) {
+  for (unsigned int i = 0, j = 0; i < 4; i++)
+  {
 
     const double srcX = src_pts(0, i);
     const double srcY = src_pts(1, i);
@@ -40,16 +75,19 @@ Eigen::Matrix3f image_stitcher::homography_calculator::calcHomography(
 Eigen::Matrix3f image_stitcher::homography_calculator::RANSAC(
     const std::pair<Eigen::MatrixXf, Eigen::MatrixXf>& points_pair,
     transformCost cost, std::size_t num_iter
-) {
+)
+{
   auto& src_pts = std::get<0>(points_pair);
   auto& dst_pts = std::get<1>(points_pair);
-  if (src_pts.rows() != 3 || dst_pts.rows() != 3) {
+  if (src_pts.rows() != 3 || dst_pts.rows() != 3)
+  {
     throw std::runtime_error(
         "image_stitcher::homography_calculator::RANSAC: source and destination points must have 3 x m dimensions"
     );
   }
 
-  if (src_pts.cols() != dst_pts.cols()) {
+  if (src_pts.cols() != dst_pts.cols())
+  {
     throw std::runtime_error(
       "image_stitcher::homography_calculator::RANSAC: source and destination points have different dimensions"
     );
@@ -60,7 +98,8 @@ Eigen::Matrix3f image_stitcher::homography_calculator::RANSAC(
 
   std::vector<std::size_t> all_points_indexes;
   all_points_indexes.reserve(src_pts.cols());
-  for (int i = 0; i < src_pts.cols(); ++i) {
+  for (int i = 0; i < src_pts.cols(); ++i)
+  {
     all_points_indexes.push_back(i);
   }
 
@@ -70,12 +109,14 @@ Eigen::Matrix3f image_stitcher::homography_calculator::RANSAC(
 
   Eigen::MatrixXf sample_src_pts{3, 4}, sample_dst_pts{3, 4};
 
-  for (std::size_t iter = 0; iter < num_iter; ++iter) {
+  for (std::size_t iter = 0; iter < num_iter; ++iter)
+  {
 
     // sample points
     std::sample(all_points_indexes.begin(), all_points_indexes.end(), std::back_inserter(sample_points_indexes),
                 sample_size, std::mt19937{std::random_device{}()});
-    for (int i = 0; i < sample_size; ++i) {
+    for (int i = 0; i < sample_size; ++i)
+    {
       sample_src_pts.col(i) = src_pts.col(sample_points_indexes[i]);
       sample_dst_pts.col(i) = dst_pts.col(sample_points_indexes[i]);
     }
@@ -85,7 +126,8 @@ Eigen::Matrix3f image_stitcher::homography_calculator::RANSAC(
 
     // update best homography if needed
     auto sample_cost = cost(homography * src_pts, dst_pts);
-    if (sample_cost < min_cost) {
+    if (sample_cost < min_cost)
+    {
       min_cost = sample_cost;
       best_homography = homography;
     }
