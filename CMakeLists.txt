@@ -22,7 +22,9 @@ set(IMAGE_STITCHER_FILES
     src/image_stitcher/image_transformation/image_transformation.cpp
     src/image_stitcher/image_transformation/image_transformation.h
     src/image_stitcher/knn_finder/knn_finder.cpp
-    src/image_stitcher/knn_finder/knn_finder.h)
+    src/image_stitcher/knn_finder/knn_finder.h
+    src/image_stitcher/knn_finder/kd_tree.cpp
+    src/image_stitcher/knn_finder/kd_tree.h)
 set(SOURCE_FILES
     src/jpeg_img.cpp
     src/jpeg_handler/jpeg_handler.cpp
