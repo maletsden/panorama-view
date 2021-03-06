@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 #include <vector>
+#include <set>
 #include <algorithm>
 #include <Eigen/Dense>
 #include "../image_stitcher.h"

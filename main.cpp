@@ -78,12 +78,11 @@ int main() {
       cv::imread("test-images/mountain_4.jpg", cv::IMREAD_COLOR),
   };
 
-  //  const std::size_t KRefImgIdx = images.size() >> 1u;
-  const std::size_t KRefImgIdx = 1;
+  const std::size_t KRefImgIdx = images_cv.size() >> 1u;
   const std::size_t KLeftImgNum = KRefImgIdx;
   const std::size_t KRightImgNum = images_cv.size() - KRefImgIdx - 1;
-  const std::size_t KRANSACIterNum = 200;
-  const auto KTransformCost = image_stitcher::homography_calculator::MSE;
+  const std::size_t KRANSACIterNum = 1000;
+  const auto KTransformCost = image_stitcher::homography_calculator::Huber;
   const std::size_t KKNNNeighNum = 2;
 
   std::vector<image_stitcher::Image> images;
@@ -124,7 +123,6 @@ int main() {
 
   // calculates matches by running brut force or KDTree based algorithm k-Nearest-Neighbours algorithm
   for (std::size_t i = 0; i < KRefImgIdx; ++i) {
-//    auto matches = image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i + 1], kNN_k);
     auto matches = image_stitcher::knn_finder::randomKDTreeForest(descriptors[i], descriptors[i + 1], KKNNNeighNum);
 
     left_good_matches.emplace_back(filterGoodMatches(matches));
@@ -154,7 +152,6 @@ int main() {
   }
 
   for (std::size_t i = KRefImgIdx + 1; i < images.size(); ++i) {
-//    auto matches = image_stitcher::knn_finder::bruteForce(descriptors[i], descriptors[i - 1], kNN_k);
     auto matches = image_stitcher::knn_finder::randomKDTreeForest(descriptors[i], descriptors[i - 1], KKNNNeighNum);
 
     right_good_matches.emplace_back(filterGoodMatches(matches));
@@ -177,7 +174,7 @@ int main() {
 
     right_homography.emplace_back(
       image_stitcher::homography_calculator::RANSAC(
-        right_keypoint_pairs.back(), image_stitcher::homography_calculator::Huber, KRANSACIterNum
+        right_keypoint_pairs.back(), KTransformCost, KRANSACIterNum
       )
     );
   }
@@ -303,8 +300,4 @@ int main() {
 
   std::cout << "Panorama successfully created!" << std::endl;
   std::cout << "Total consumed time: " << to_ms(finish - start) << std::endl;
-
-
-
-  // TODO: crop image
 }

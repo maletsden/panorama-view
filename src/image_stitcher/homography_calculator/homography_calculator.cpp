@@ -37,8 +37,8 @@ Eigen::Matrix3f image_stitcher::homography_calculator::calcHomography(
     const Eigen::MatrixXf& src_pts, const Eigen::MatrixXf& dst_pts
 )
 {
-  typedef Eigen::Matrix<float, 8, 8> HomographyMatrix;
-  HomographyMatrix PH;
+  typedef Eigen::Matrix<float, 8, 8> HomographySystems;
+  HomographySystems PH;
   Eigen::VectorXf b{8};
   for (unsigned int i = 0, j = 0; i < 4; i++)
   {
@@ -56,7 +56,7 @@ Eigen::Matrix3f image_stitcher::homography_calculator::calcHomography(
 
   // solve PH * x = b
   Eigen::VectorXf x{8};
-  Eigen::HouseholderQR<HomographyMatrix> qr(PH);
+  Eigen::HouseholderQR<HomographySystems> qr(PH);
   x = qr.solve(b);
 
   Eigen::Matrix3f result;
