@@ -7,12 +7,18 @@
 
 #include "../src/image_stitcher/image_stitcher.h"
 
-void compareNN(const image_stitcher::Matches& expected_nn, const image_stitcher::Matches& nn) {
+void compareNN(
+  const std::vector<std::vector<image_stitcher::Match>>& expected_nn,
+  const std::vector<std::vector<image_stitcher::Match>>& nn
+)
+{
   ASSERT_EQ(expected_nn.size(), nn.size());
-  for (int i = 0; i < expected_nn.size(); ++i) {
-    ASSERT_EQ(expected_nn[i].pt1, nn[i].pt1);
-    ASSERT_EQ(expected_nn[i].pt2, nn[i].pt2);
-    ASSERT_NEAR(expected_nn[i].distance, nn[i].distance, 1e-5);
+  for (std::size_t i = 0; i < expected_nn.size(); ++i) {
+    for (std::size_t j = 0; j < expected_nn[i].size(); ++j) {
+      ASSERT_EQ(expected_nn[i][j].pt1, nn[i][j].pt1);
+      ASSERT_EQ(expected_nn[i][j].pt2, nn[i][j].pt2);
+      ASSERT_NEAR(expected_nn[i][j].distance, nn[i][j].distance, 1e-5);
+    }
   }
 }
 
@@ -26,11 +32,15 @@ TEST(kNNFinder, BF_SIMPLE_TEST) {
 
   auto nn = image_stitcher::knn_finder::bruteForce(pt1, pt2, 2);
 
-  image_stitcher::Matches expected_nn{
+  std::vector<std::vector<image_stitcher::Match>> expected_nn {
+    {
       image_stitcher::Match{0, 0, 32},
       image_stitcher::Match{0, 1, 72},
+    },
+    {
       image_stitcher::Match{1, 0, 8},
       image_stitcher::Match{1, 1, 32},
+    }
   };
 
   compareNN(expected_nn, nn);
@@ -41,12 +51,17 @@ TEST(kNNFinder, BF_ZEROS) {
 
   auto nn = image_stitcher::knn_finder::bruteForce(pt1, pt2, 2);
 
-  image_stitcher::Matches expected_nn{
+  std::vector<std::vector<image_stitcher::Match>> expected_nn {
+    {
       image_stitcher::Match{0, 0, 0},
       image_stitcher::Match{0, 1, 0},
+    },
+    {
       image_stitcher::Match{1, 0, 0},
       image_stitcher::Match{1, 1, 0},
+    }
   };
+
 
   compareNN(expected_nn, nn);
 }
@@ -56,33 +71,58 @@ TEST(kNNFinder, BF_ONES) {
 
   auto nn = image_stitcher::knn_finder::bruteForce(pt1, pt2, 2);
 
-  image_stitcher::Matches expected_nn{
+  std::vector<std::vector<image_stitcher::Match>> expected_nn {
+    {
       image_stitcher::Match{0, 0, 0},
       image_stitcher::Match{0, 1, 0},
+    },
+    {
       image_stitcher::Match{1, 0, 0},
       image_stitcher::Match{1, 1, 0},
+    }
   };
 
   compareNN(expected_nn, nn);
 }
+std::ostream& operator<<(std::ostream& os, const image_stitcher::Match& m) {
+  os << "Match<" << m.pt1 << ", " << m.pt2 << ", " << m.distance << ">";
 
-//TEST(kNNFinder, KDTREE_SIMPLE_TEST) {
-//  Eigen::Matrix2f pt1, pt2;
-//
-//  pt1 << 0, 4,
-//         4, 4;
-//  pt2 << 0, 4,
-//         0, 0;
-//
-//  auto nn = image_stitcher::knn_finder::kDTree(pt1, pt2, 2);
-//
-//  image_stitcher::Matches expected_nn{
-//      image_stitcher::Match{0, 0, 4},
-//      image_stitcher::Match{0, 1, 2},
-//      image_stitcher::Match{1, 0, 2},
-//      image_stitcher::Match{1, 1, 4},
-//  };
-//
-//  compareNN(expected_nn, nn);
-//}
+  return os;
+}
+
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const std::vector<T>& vector) {
+  os << '[';
+  for (int i = 0; i < static_cast<int>(vector.size()) - 1; ++i) {
+//  for (int i = 0; i < 20; ++i) {
+    os << vector[i] << ", ";
+  }
+  os << vector.back() << ']';
+
+  return os;
+}
+TEST(kNNFinder, KDTREE_SIMPLE_TEST) {
+  Eigen::Matrix2f pt1, pt2;
+
+  pt1 << 0, 4,
+         4, 4;
+  pt2 << 0, 4,
+         0, 0;
+
+  auto nn = image_stitcher::knn_finder::randomKDTreeForest(pt1, pt2, 2);
+
+  std::vector<std::vector<image_stitcher::Match>> expected_nn {
+      {
+          image_stitcher::Match{0, 0, 0},
+          image_stitcher::Match{0, 1, 16},
+      },
+      {
+          image_stitcher::Match{1, 0, 16},
+          image_stitcher::Match{1, 1, 32},
+      }
+  };
+
+
+  compareNN(expected_nn, nn);
+}
 #endif //PANORAMA_VIEW_TEST_KNN_FINDER_H

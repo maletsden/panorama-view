@@ -60,7 +60,7 @@ std::vector<std::vector<image_stitcher::Match>> image_stitcher::knn_finder::brut
 
 double squareDistance(const Eigen::VectorXf& point1, const Eigen::VectorXf& point2)
 {
-  return static_cast<double>((point1 - point2).norm());
+  return static_cast<double>((point1 - point2).squaredNorm());
 }
 
 std::vector<std::vector<image_stitcher::Match>> image_stitcher::knn_finder::randomKDTreeForest(
@@ -82,8 +82,7 @@ std::vector<std::vector<image_stitcher::Match>> image_stitcher::knn_finder::rand
   std::vector<image_stitcher::Match> matches;
   matches.reserve(trees_num * (points2.size() * kd_tree_leaves_percent));
 
-  std::vector<std::size_t> knn_indexes;
-  knn_indexes.reserve(trees_num * (points2.size() * kd_tree_leaves_percent));
+  std::set<std::size_t> knn_indexes;
 
   for (std::size_t i = 0; i < static_cast<std::size_t>(points1.rows()); ++i)
   {
@@ -94,7 +93,7 @@ std::vector<std::vector<image_stitcher::Match>> image_stitcher::knn_finder::rand
     for (const auto& kd_tree: forest)
     {
       auto knn_idx = kd_tree.findKNN(point);
-      knn_indexes.insert(knn_indexes.end(), knn_idx.begin(), knn_idx.end());
+      knn_indexes.insert(knn_idx.begin(), knn_idx.end());
     }
 
     // sort matches of possible knn points based on their distances

@@ -3,6 +3,8 @@
 
 #include <Eigen/Dense>
 #include "../image_stitcher.h"
+#include <array>
+#include <limits>
 
 namespace image_stitcher::image_transformation {
   /**
@@ -14,11 +16,20 @@ namespace image_stitcher::image_transformation {
    * @param homography - homography transformation matrix
    * @param shift_by_rows - number of rows that need to be shifted from start of destination image
    * @param shift_by_cols - number of cols that need to be shifted from start of destination image
-   * @param img_n_channels - the number of channels of images
    */
   void applyHomography(
     const image_stitcher::Image& src_img, image_stitcher::Image& dst_img,
-    const Eigen::Matrix3f& homography, int shift_by_rows = 0, int shift_by_cols = 0, int img_n_channels = 3
+    const Eigen::Matrix3f& homography, long shift_by_rows = 0, long shift_by_cols = 0
+  );
+
+  /**
+   *
+   * @param homography
+   * @param pts
+   * @return
+   */
+  Eigen::MatrixXf applyHomography(
+      const Eigen::Matrix3f& homography, const Eigen::MatrixXf& pts
   );
 }
 
