@@ -4,10 +4,7 @@ Fast Panorama Stitching for Image Sequence
 # Demonstraition
 
 ## Input images
-<img src="test-images/mountain_1.jpg?raw=true" width=200/>
-<img src="test-images/mountain_2.jpg?raw=true" width=200/>
-<img src="test-images/mountain_3.jpg?raw=true" width=200/>
-<img src="test-images/mountain_4.jpg?raw=true" width=200/>
+<img src="test-images/mountain_1.jpg?raw=true" width=200/> <img src="test-images/mountain_2.jpg?raw=true" width=200/> <img src="test-images/mountain_3.jpg?raw=true" width=200/> <img src="test-images/mountain_4.jpg?raw=true" width=200/>
 
 ## Generated panorama
 <img src="results/mountain.jpg?raw=true" width=800/>
